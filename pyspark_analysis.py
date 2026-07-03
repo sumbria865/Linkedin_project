@@ -39,7 +39,9 @@ print("Spark version:", spark.version)
 HDFS_BASE = "hdfs://localhost:9000/user/codebind/linkedin"
 
 job_skills = spark.read.csv(f"{HDFS_BASE}/job_skills.csv", header=True, inferSchema=True)
-job_summary = spark.read.csv(f"{HDFS_BASE}/job_summary.csv", header=True, inferSchema=True)
+job_summary = spark.read.option("multiLine", "true").option("escape", '"').csv(
+    f"{HDFS_BASE}/job_summary.csv", header=True, inferSchema=True
+)
 job_listings = spark.read.csv(f"{HDFS_BASE}/linkedin_job_postings.csv", header=True, inferSchema=True)
 
 print("Job Skills rows:", job_skills.count())
@@ -139,14 +141,66 @@ plt.close()
 print("Saved: ~/output_top_skills.png")
 
 # -----------------------------------------------------------------------
+# STEP 7b: Additional exports for a richer Power BI dashboard
+# -----------------------------------------------------------------------
+
+# Job type distribution (Remote / Onsite / Hybrid)
+job_type_dist = spark.sql("""
+    SELECT job_type, COUNT(*) AS count
+    FROM linkedin_job_postings_2024
+    GROUP BY job_type
+    ORDER BY count DESC
+""").toPandas()
+
+# Job level distribution (Entry, Mid senior, Associate, etc.)
+job_level_dist = spark.sql("""
+    SELECT job_level, COUNT(*) AS count
+    FROM linkedin_job_postings_2024
+    GROUP BY job_level
+    ORDER BY count DESC
+""").toPandas()
+
+# Top 15 job locations
+top_locations = spark.sql("""
+    SELECT job_location, COUNT(*) AS count
+    FROM linkedin_job_postings_2024
+    GROUP BY job_location
+    ORDER BY count DESC
+    LIMIT 15
+""").toPandas()
+
+# Top 10 job titles
+top_titles = spark.sql("""
+    SELECT job_title, COUNT(*) AS count
+    FROM linkedin_job_postings_2024
+    GROUP BY job_title
+    ORDER BY count DESC
+    LIMIT 10
+""").toPandas()
+
+# Skill demand by job level (which skills matter most at Entry vs Senior etc.)
+skills_by_level = spark.sql("""
+    SELECT job_level, skill, COUNT(*) AS count
+    FROM (
+        SELECT job_level, explode(split(job_skills, ',')) AS skill
+        FROM linkedin_job_postings_2024
+    ) t
+    GROUP BY job_level, skill
+    ORDER BY job_level, count DESC
+""").toPandas()
+
+# -----------------------------------------------------------------------
 # STEP 8: Export results for Power BI
-# We write these back out to HDFS, then pull them to local disk so
-# Power BI (which runs outside Docker, on Windows) can read them.
 # -----------------------------------------------------------------------
 
 top_companies.to_csv("/home/codebind/output_top_companies.csv", index=False)
 top_skills.to_csv("/home/codebind/output_top_skills.csv", index=False)
+job_type_dist.to_csv("/home/codebind/output_job_type_distribution.csv", index=False)
+job_level_dist.to_csv("/home/codebind/output_job_level_distribution.csv", index=False)
+top_locations.to_csv("/home/codebind/output_top_locations.csv", index=False)
+top_titles.to_csv("/home/codebind/output_top_titles.csv", index=False)
+skills_by_level.to_csv("/home/codebind/output_skills_by_level.csv", index=False)
 
-print("\nDone. Check your home directory (~) for output_*.csv and .png files.")
+print("\nDone. 7 CSV files exported to your home directory (~) for Power BI.")
 
 spark.stop()
